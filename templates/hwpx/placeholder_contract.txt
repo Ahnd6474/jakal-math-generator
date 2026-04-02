@@ -1,0 +1,13 @@
+HWPX Placeholder Contract (export engine)
+
+- {{QUESTION_N_NUMBER}}: rendered 1-based display number
+- {{QUESTION_N_ID}}: generated question id
+- {{QUESTION_N_STEM}}: question stem text
+- {{QUESTION_N_CHOICE_M}}: choice text (M starts at 1)
+- {{QUESTION_N_ANSWER}}: canonical answer text
+- {{QUESTION_N_EXPLANATION}}: explanation text (optional)
+
+Notes:
+- Keep placeholders in text/script nodes so style ids remain untouched.
+- Export path performs token replacement only and does not regenerate section XML.
+
