@@ -164,50 +164,44 @@ def test_launcher_entrypoint_reaches_export_preserving_hwpx_contracts(
         def __init__(self, repo_root: Path) -> None:
             self.repo_root = repo_root
 
-    class FakeWindow:
-        def __init__(self, shell_app: ProductShellApp) -> None:
-            self.shell_app = shell_app
-            self.mainloop_calls = 0
-
-        def mainloop(self) -> None:
-            self.mainloop_calls += 1
-
     def fake_from_path(path: Path, *, repo_root: Path) -> FakeConfig:
         assert path == repo_root / "configs" / "codex" / "execution.json"
         return FakeConfig(repo_root)
 
     def fake_adapter_factory(config: FakeConfig) -> FakeAdapter:
-        assert config.repo_root == tmp_path
+        assert config.repo_root == desktop_main.REPO_ROOT
         return adapter
-
-    launcher_state: dict[str, object] = {}
-
-    def fake_build_window(*, shell_app=None):
-        if shell_app is None:
-            shell_app = desktop_main.build_product_shell(repo_root=tmp_path)
-        window = FakeWindow(shell_app)
-        launcher_state["window"] = window
-        return window
 
     monkeypatch.setattr(desktop_main.CodexExecutionConfig, "from_path", fake_from_path)
     monkeypatch.setattr(desktop_main, "CodexCliAdapter", fake_adapter_factory)
-    monkeypatch.setattr(desktop_main, "build_window", fake_build_window)
+    monkeypatch.setattr(desktop_main.ProductShellWindow, "mainloop", lambda self: None)
 
     window = desktop_main.launch_desktop_app()
-    assert window is launcher_state["window"]
-    assert window.mainloop_calls == 1
     assert isinstance(window.shell_app, ProductShellApp)
 
-    accepted = window.shell_app.start_generation(_build_form(template_path))
-    assert accepted.status == RunStatus.ACCEPTED
+    output_path = tmp_path / "launcher-output.hwpx"
+    window.withdraw()
+    try:
+        window.template_path_var.set(str(template_path))
+        window.output_path_var.set(str(output_path))
 
-    exported = window.shell_app.export_hwpx(output_path=export_path)
-    assert exported.status == RunStatus.EXPORT_SUCCEEDED
+        window._on_generate()
+        assert window.shell_app.state.status == RunStatus.ACCEPTED
+        assert "Launcher-generated stem." in window.preview_text.get("1.0", "end")
+
+        window._on_export()
+        assert window.shell_app.state.status == RunStatus.EXPORT_SUCCEEDED
+        assert str(output_path) in window.export_var.get()
+    finally:
+        window.destroy()
+
+    exported = window.shell_app.state
     assert exported.export_result is not None
+    assert exported.export_result.output_path == output_path
     assert exported.export_result.verified_reopen is True
     assert exported.export_result.style_ids_preserved is True
 
-    archive = HwpxArchive.load(export_path)
+    archive = HwpxArchive.load(output_path)
     preview = archive.read_preview_text()
     section_xml = archive.contents["Contents/section0.xml"].decode("utf-8")
 
@@ -215,6 +209,50 @@ def test_launcher_entrypoint_reaches_export_preserving_hwpx_contracts(
     assert "{{QUESTION_1_STEM}}" not in preview
     assert 'styleIDRef="12"' in section_xml
     assert 'styleIDRef="13"' in section_xml
+
+
+def test_launcher_window_surfaces_parse_failure(tmp_path: Path, monkeypatch) -> None:
+    template_path = tmp_path / "template.hwpx"
+    _create_template(template_path)
+
+    adapter = FakeAdapter(
+        [
+            _make_adapter_result(
+                tmp_path,
+                output=None,
+                success=False,
+                parse_error="No JSON object start token found.",
+            )
+        ]
+    )
+
+    class FakeConfig:
+        def __init__(self, repo_root: Path) -> None:
+            self.repo_root = repo_root
+
+    def fake_from_path(path: Path, *, repo_root: Path) -> FakeConfig:
+        assert path == repo_root / "configs" / "codex" / "execution.json"
+        return FakeConfig(repo_root)
+
+    def fake_adapter_factory(config: FakeConfig) -> FakeAdapter:
+        assert config.repo_root == desktop_main.REPO_ROOT
+        return adapter
+
+    monkeypatch.setattr(desktop_main.CodexExecutionConfig, "from_path", fake_from_path)
+    monkeypatch.setattr(desktop_main, "CodexCliAdapter", fake_adapter_factory)
+    monkeypatch.setattr(desktop_main.ProductShellWindow, "mainloop", lambda self: None)
+
+    window = desktop_main.launch_desktop_app()
+    window.withdraw()
+    try:
+        window.template_path_var.set(str(template_path))
+        window._on_generate()
+
+        assert window.status_var.get() == RunStatus.CODEX_PARSE_FAILED.value
+        error_text = window.error_text.get("1.0", "end")
+        assert "No JSON object start token found." in error_text
+    finally:
+        window.destroy()
 
 
 def test_shell_distinguishes_codex_parse_failure(tmp_path: Path) -> None:

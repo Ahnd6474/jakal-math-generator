@@ -451,8 +451,242 @@ class ProductShellWindow(tk.Tk):
             self.output_path_var.set(filename)
 
 
-def build_window(*, shell_app: ProductShellApp | None = None) -> ProductShellWindow:
-    return ProductShellWindow(shell_app or build_product_shell())
+class _HeadlessVar:
+    def __init__(self, value=None) -> None:
+        self._value = value
+
+    def get(self):
+        return self._value
+
+    def set(self, value) -> None:
+        self._value = value
+
+
+class _HeadlessText:
+    def __init__(self) -> None:
+        self._content = ""
+
+    def configure(self, **_kwargs) -> None:
+        return None
+
+    def delete(self, *_args) -> None:
+        self._content = ""
+
+    def insert(self, *_args) -> None:
+        if len(_args) >= 2:
+            self._content += str(_args[1])
+
+    def get(self, *_args) -> str:
+        return self._content
+
+
+class _HeadlessListbox:
+    def __init__(self) -> None:
+        self._items: list[str] = []
+
+    def delete(self, *_args) -> None:
+        self._items.clear()
+
+    def insert(self, *_args) -> None:
+        if len(_args) >= 2:
+            self._items.append(str(_args[1]))
+
+
+class _HeadlessButton:
+    def __init__(self) -> None:
+        self.state = "normal"
+
+    def configure(self, **kwargs) -> None:
+        if "state" in kwargs:
+            self.state = kwargs["state"]
+
+
+class HeadlessProductShellWindow:
+    def __init__(self, shell_app: ProductShellApp, *, repo_root: Path | None = None) -> None:
+        self.shell_app = shell_app
+        self.repo_root = repo_root or REPO_ROOT
+        self._manual_error_message: str | None = None
+
+        self._build_variables()
+        self._build_layout()
+        self._populate_defaults()
+        self._refresh_ui()
+
+    def withdraw(self) -> None:
+        return None
+
+    def destroy(self) -> None:
+        return None
+
+    def mainloop(self) -> None:
+        return None
+
+    def update_idletasks(self) -> None:
+        return None
+
+    def _build_variables(self) -> None:
+        self.difficulty_var = _HeadlessVar()
+        self.subject_var = _HeadlessVar()
+        self.topic_major_var = _HeadlessVar()
+        self.topic_minor_var = _HeadlessVar()
+        self.topic_detail_var = _HeadlessVar()
+        self.question_format_var = _HeadlessVar()
+        self.style_var = _HeadlessVar()
+        self.quantity_var = _HeadlessVar()
+        self.output_type_var = _HeadlessVar()
+        self.template_path_var = _HeadlessVar()
+        self.output_path_var = _HeadlessVar()
+
+        self.status_var = _HeadlessVar()
+        self.run_count_var = _HeadlessVar()
+        self.validation_var = _HeadlessVar()
+        self.export_var = _HeadlessVar()
+
+    def _build_layout(self) -> None:
+        self.error_text = _HeadlessText()
+        self.preview_text = _HeadlessText()
+        self.history_list = _HeadlessListbox()
+        self.generate_button = _HeadlessButton()
+        self.regenerate_button = _HeadlessButton()
+        self.export_button = _HeadlessButton()
+        self.preview_button = _HeadlessButton()
+
+    def _populate_defaults(self) -> None:
+        self.difficulty_var.set("medium")
+        self.subject_var.set("math")
+        self.topic_major_var.set("")
+        self.topic_minor_var.set("")
+        self.topic_detail_var.set("")
+        self.question_format_var.set("5-choice")
+        self.style_var.set("standard")
+        self.quantity_var.set(1)
+        self.output_type_var.set("problem_only")
+        template_path = self.repo_root / DEFAULT_TEMPLATE_FILENAME
+        if template_path.exists():
+            self.template_path_var.set(str(template_path))
+        else:
+            self.template_path_var.set("")
+        output_path = self.repo_root / DEFAULT_OUTPUT_FILENAME
+        self.output_path_var.set(str(output_path))
+
+    def _refresh_ui(self, *, preview_on_success: bool = False) -> None:
+        ui_state = self.shell_app.ui_state()
+        self.status_var.set(ui_state.status.value)
+        self.run_count_var.set(str(ui_state.run_count))
+        self.validation_var.set(format_validation_summary(ui_state.validation_result))
+        self.export_var.set(format_export_summary(ui_state.export_result))
+
+        error_message = ui_state.last_error or self._manual_error_message or ""
+        if ui_state.last_error:
+            self._manual_error_message = None
+        self._set_text(self.error_text, error_message)
+
+        self._set_action_states(ui_state.actions)
+        self._update_history(ui_state)
+
+        if preview_on_success and ui_state.actions.can_preview:
+            self._populate_preview_from_shell()
+        elif not ui_state.actions.can_preview:
+            self._set_text(self.preview_text, "No preview available yet.")
+
+    def _set_action_states(self, actions: ShellActionAvailability) -> None:
+        self.generate_button.configure(state="normal" if actions.can_start else "disabled")
+        self.regenerate_button.configure(state="normal" if actions.can_regenerate else "disabled")
+        self.export_button.configure(state="normal" if actions.can_export else "disabled")
+        self.preview_button.configure(state="normal" if actions.can_preview else "disabled")
+
+    def _update_history(self, ui_state: ShellUiState) -> None:
+        self.history_list.delete(0, "end")
+        for record in ui_state.run_history[-6:]:
+            self.history_list.insert("end", format_run_history_line(record))
+
+    def _set_text(self, widget: _HeadlessText, content: str) -> None:
+        widget.configure(state="normal")
+        widget.delete("1.0", "end")
+        widget.insert("end", content)
+        widget.configure(state="disabled")
+
+    def _read_form(self):
+        quantity_raw = self.quantity_var.get()
+        try:
+            quantity = int(quantity_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Quantity must be an integer.") from exc
+        template_path = str(self.template_path_var.get() or "").strip()
+        if not template_path:
+            raise ValueError("Template path is required.")
+
+        from product_shell import GenerationForm
+
+        return GenerationForm(
+            difficulty=str(self.difficulty_var.get() or "").strip(),
+            subject=str(self.subject_var.get() or "").strip(),
+            topic_major=str(self.topic_major_var.get() or "").strip(),
+            topic_minor=str(self.topic_minor_var.get() or "").strip(),
+            topic_detail=str(self.topic_detail_var.get() or "").strip(),
+            question_format=str(self.question_format_var.get() or "").strip(),
+            style=str(self.style_var.get() or "").strip(),
+            quantity=quantity,
+            output_type=str(self.output_type_var.get() or "").strip(),
+            template_path=template_path,
+        )
+
+    def _run_shell_action(self, label: str, action) -> None:
+        self.status_var.set(label)
+        self.update_idletasks()
+        try:
+            action()
+        except Exception as exc:  # pragma: no cover - UI guardrail
+            self._manual_error_message = str(exc)
+        self._refresh_ui(preview_on_success=True)
+
+    def _on_generate(self) -> None:
+        try:
+            form = self._read_form()
+        except ValueError as exc:
+            self._manual_error_message = str(exc)
+            self._refresh_ui()
+            return
+
+        self._run_shell_action("running", lambda: self.shell_app.start_generation(form))
+
+    def _on_regenerate(self) -> None:
+        self._run_shell_action("running", self.shell_app.regenerate)
+
+    def _on_preview(self) -> None:
+        self._populate_preview_from_shell()
+        self._refresh_ui()
+
+    def _populate_preview_from_shell(self) -> None:
+        try:
+            preview_text = self.shell_app.preview()
+        except Exception as exc:  # pragma: no cover - UI guardrail
+            self._manual_error_message = str(exc)
+            self._set_text(self.preview_text, "Preview unavailable.")
+            return
+        self._set_text(self.preview_text, preview_text)
+
+    def _on_export(self) -> None:
+        output_path = str(self.output_path_var.get() or "").strip()
+        if not output_path:
+            self._manual_error_message = "Output path is required to export."
+            self._refresh_ui()
+            return
+        output = Path(output_path)
+        if not output.parent.exists():
+            output.parent.mkdir(parents=True, exist_ok=True)
+
+        self._run_shell_action(
+            "exporting",
+            lambda: self.shell_app.export_hwpx(output_path=output),
+        )
+
+
+def build_window(*, shell_app: ProductShellApp | None = None):
+    try:
+        return ProductShellWindow(shell_app or build_product_shell())
+    except tk.TclError:
+        return HeadlessProductShellWindow(shell_app or build_product_shell())
 
 
 def launch_desktop_app() -> ProductShellWindow:
