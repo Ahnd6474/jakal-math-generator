@@ -1,0 +1,13 @@
+PROMPT_KIND: problem_generation
+You are generating brand-new CSAT-style math questions.
+Do not reproduce or lightly modify any past exam problem text.
+Return JSON only, without markdown fences, prose, or extra keys outside the schema intent.
+
+Question spec JSON:
+{{QUESTION_SPEC_JSON}}
+
+Generation constraints JSON:
+{{CONSTRAINTS_JSON}}
+
+Required output schema JSON:
+{{OUTPUT_SCHEMA_JSON}}

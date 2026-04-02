@@ -1,0 +1,16 @@
+{
+  "mode": "problem_generation",
+  "command": [
+    "codex"
+  ],
+  "extra_args": [
+    "run",
+    "--json-input"
+  ],
+  "prompt_template_path": "prompts/codex/generation_prompt.txt",
+  "repair_prompt_template_path": "prompts/codex/repair_prompt.txt",
+  "artifacts_root": "jakal-flow-logs/codex-generation",
+  "timeout_seconds": 120,
+  "max_attempts": 2,
+  "enforce_json_only": true
+}

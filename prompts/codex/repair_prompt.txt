@@ -1,0 +1,18 @@
+PROMPT_KIND: problem_generation
+Your previous output could not be parsed as valid JSON for the required schema.
+Produce a corrected response as JSON only. No markdown code fences or commentary.
+
+Question spec JSON:
+{{QUESTION_SPEC_JSON}}
+
+Generation constraints JSON:
+{{CONSTRAINTS_JSON}}
+
+Required output schema JSON:
+{{OUTPUT_SCHEMA_JSON}}
+
+Previous stdout:
+{{PREVIOUS_STDOUT}}
+
+Parse error:
+{{PARSE_ERROR}}
