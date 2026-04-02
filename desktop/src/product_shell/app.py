@@ -119,6 +119,49 @@ class ShellState:
     run_count: int = 0
 
 
+@dataclass(frozen=True)
+class ShellActionAvailability:
+    can_start: bool
+    can_regenerate: bool
+    can_preview: bool
+    can_export: bool
+    is_busy: bool
+
+
+@dataclass(frozen=True)
+class ShellRunRecord:
+    index: int
+    status: RunStatus
+    error: str | None
+    has_output: bool
+    export_path: str | None
+
+
+@dataclass(frozen=True)
+class ShellRunContext:
+    last_form: GenerationForm | None
+    last_status: RunStatus
+    last_error: str | None
+    run_count: int
+    has_output: bool
+    has_export: bool
+    export_path: str | None
+
+
+@dataclass(frozen=True)
+class ShellUiState:
+    status: RunStatus
+    last_error: str | None
+    validation_result: GenerationValidationResult | None
+    generation_output: CodexGenerationOutput | None
+    export_result: HwpxExportResult | None
+    codex_logs: tuple[CodexAttemptLog, ...]
+    run_count: int
+    actions: ShellActionAvailability
+    run_context: ShellRunContext
+    run_history: tuple[ShellRunRecord, ...]
+
+
 @dataclass
 class ProductShellApp:
     adapter: GenerationAdapter
@@ -127,6 +170,7 @@ class ProductShellApp:
     reference_corpus: Sequence[str] = ()
     state: ShellState = field(default_factory=ShellState)
     _last_form: GenerationForm | None = field(default=None, init=False, repr=False)
+    _run_history: list[ShellState] = field(default_factory=list, init=False, repr=False)
 
     def start_generation(
         self,
@@ -147,6 +191,7 @@ class ProductShellApp:
                 codex_logs=logs,
                 run_count=self.state.run_count,
             )
+            self._record_state()
             return self.state
 
         validation = self.validator.validate_output(
@@ -167,6 +212,7 @@ class ProductShellApp:
                 codex_logs=logs,
                 run_count=self.state.run_count,
             )
+            self._record_state()
             return self.state
 
         self.state = ShellState(
@@ -176,6 +222,7 @@ class ProductShellApp:
             codex_logs=logs,
             run_count=self.state.run_count,
         )
+        self._record_state()
         return self.state
 
     def regenerate(self, *, constraints: Mapping[str, Any] | None = None) -> ShellState:
@@ -223,6 +270,7 @@ class ProductShellApp:
                 codex_logs=self.state.codex_logs,
                 run_count=self.state.run_count,
             )
+            self._record_state()
             return self.state
         except (HwpxExportError, OSError, ValueError) as exc:
             self.state = ShellState(
@@ -233,7 +281,69 @@ class ProductShellApp:
                 codex_logs=self.state.codex_logs,
                 run_count=self.state.run_count,
             )
+            self._record_state()
             return self.state
+
+    def ui_state(self) -> ShellUiState:
+        actions = self._action_availability()
+        run_context = self._run_context()
+        return ShellUiState(
+            status=self.state.status,
+            last_error=self.state.last_error,
+            validation_result=self.state.validation_result,
+            generation_output=self.state.generation_output,
+            export_result=self.state.export_result,
+            codex_logs=self.state.codex_logs,
+            run_count=self.state.run_count,
+            actions=actions,
+            run_context=run_context,
+            run_history=self.run_history(),
+        )
+
+    def run_history(self) -> tuple[ShellRunRecord, ...]:
+        return tuple(self._history_record(item) for item in self._run_history)
+
+    def _action_availability(self) -> ShellActionAvailability:
+        is_busy = self.state.status == RunStatus.RUNNING
+        has_output = self.state.generation_output is not None
+        has_form = self._last_form is not None
+        return ShellActionAvailability(
+            can_start=not is_busy,
+            can_regenerate=not is_busy and has_form,
+            can_preview=not is_busy and has_output,
+            can_export=not is_busy and has_output and has_form,
+            is_busy=is_busy,
+        )
+
+    def _run_context(self) -> ShellRunContext:
+        export_path = None
+        if self.state.export_result is not None:
+            export_path = str(self.state.export_result.output_path)
+        return ShellRunContext(
+            last_form=self._last_form,
+            last_status=self.state.status,
+            last_error=self.state.last_error,
+            run_count=self.state.run_count,
+            has_output=self.state.generation_output is not None,
+            has_export=self.state.export_result is not None,
+            export_path=export_path,
+        )
+
+    def _record_state(self) -> None:
+        self._run_history.append(self.state)
+
+    @staticmethod
+    def _history_record(state: ShellState) -> ShellRunRecord:
+        export_path = None
+        if state.export_result is not None:
+            export_path = str(state.export_result.output_path)
+        return ShellRunRecord(
+            index=state.run_count,
+            status=state.status,
+            error=state.last_error,
+            has_output=state.generation_output is not None,
+            export_path=export_path,
+        )
 
 
 def bootstrap_product_shell(
