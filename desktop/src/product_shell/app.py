@@ -236,6 +236,21 @@ class ProductShellApp:
             return self.state
 
 
+def bootstrap_product_shell(
+    *,
+    adapter: GenerationAdapter,
+    validator: GenerationValidator,
+    exporter: HwpxExportEngine,
+    reference_corpus: Sequence[str] = (),
+) -> ProductShellApp:
+    return ProductShellApp(
+        adapter=adapter,
+        validator=validator,
+        exporter=exporter,
+        reference_corpus=reference_corpus,
+    )
+
+
 def _load_codex_attempt_logs(root: Path, attempt_count: int) -> tuple[CodexAttemptLog, ...]:
     logs: list[CodexAttemptLog] = []
     for attempt in range(1, attempt_count + 1):

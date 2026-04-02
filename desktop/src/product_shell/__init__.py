@@ -3,6 +3,7 @@ from .app import (
     ProductShellApp,
     RunStatus,
     ShellState,
+    bootstrap_product_shell,
 )
 
 __all__ = [
@@ -10,4 +11,5 @@ __all__ = [
     "ProductShellApp",
     "RunStatus",
     "ShellState",
+    "bootstrap_product_shell",
 ]
