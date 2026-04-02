@@ -682,14 +682,15 @@ class HeadlessProductShellWindow:
         )
 
 
-def build_window(*, shell_app: ProductShellApp | None = None):
+def build_window(*, shell_app: ProductShellApp | None = None) -> ProductShellWindow | HeadlessProductShellWindow:
+    shell = shell_app or build_product_shell()
     try:
-        return ProductShellWindow(shell_app or build_product_shell())
+        return ProductShellWindow(shell)
     except tk.TclError:
-        return HeadlessProductShellWindow(shell_app or build_product_shell())
+        return HeadlessProductShellWindow(shell)
 
 
-def launch_desktop_app() -> ProductShellWindow:
+def launch_desktop_app() -> ProductShellWindow | HeadlessProductShellWindow:
     window = build_window()
     window.mainloop()
     return window

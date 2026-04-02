@@ -6,6 +6,7 @@ The verified implementation in this repository includes:
 
 - a runnable Tk desktop launcher at `desktop/src/main.py`
 - a shared product shell in `desktop/src/product_shell/app.py`
+- a UI controller layer in `desktop/src/product_shell/ui.py`
 - Codex CLI adapter/config loading for generation runs
 - validation and retry-state handling for generated questions
 - HWPX placeholder rendering with archive round-trip checks
@@ -18,7 +19,7 @@ The main design principle is HWPX structure preservation. Generation quality mat
 - Desktop launcher: `python desktop/src/main.py`
 - Test suite: `python -m pytest`
 
-The desktop launcher is the checked-in GUI entrypoint. It builds the shared product shell, opens a Tk window, and does not use a separate web UI path.
+The desktop launcher is the checked-in GUI entrypoint. It builds the shared product shell, opens a Tk window when Tk is available, and falls back to a headless test-friendly window for non-GUI environments. It does not use a separate web UI path.
 
 ## Requirements
 
@@ -62,6 +63,12 @@ For a non-interactive smoke check, the launcher can be imported and constructed 
 python -c "import main; w=main.build_window(); w.update_idletasks(); w.destroy(); print('GUI smoke ok')"
 ```
 
+You can also run the launcher directly:
+
+```powershell
+python desktop/src/main.py
+```
+
 ## Product Shell Workflow
 
 The shared shell in `desktop/src/product_shell/app.py` coordinates the product flow:
@@ -95,6 +102,7 @@ Verified checks include:
 - archive entry order preservation
 - untouched payload byte preservation
 - style-id fingerprint preservation before the output replaces the destination file
+- end-to-end launcher coverage through the shared shell
 
 Relevant implementation files:
 
@@ -140,9 +148,11 @@ The verified coverage includes:
 - Real generation requires a local `codex` executable and a valid `configs/codex/execution.json`.
 - The export engine only renders the verified placeholder contract surface.
 - HWPX safety is enforced by tests and runtime guards, but template changes still need review.
+- Tk GUI smoke checks still depend on the local environment being able to import `tkinter`; otherwise the launcher falls back to the headless window used by tests.
 
 ## Operator Notes
 
 - Keep `templates/hwpx/placeholder_contract.txt` aligned with the placeholders used by the export engine.
 - Keep `desktop/src/main.py` as the single GUI entrypoint unless a new launcher path is added deliberately.
+- Keep `desktop/src/product_shell/ui.py` aligned with `desktop/src/product_shell/app.py` so the controller stays a thin projection of shell state.
 - If you change HWPX template structure, rerun `python -m pytest` before shipping.

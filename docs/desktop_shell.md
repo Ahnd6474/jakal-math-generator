@@ -29,7 +29,7 @@ The shell keeps product-facing run states explicit so the desktop UI can render 
 
 - difficulty
 - subject
-- topic (major/middle/detail)
+- topic (major/minor/detail)
 - question format (`5-choice` or `short-answer`)
 - style
 - quantity
@@ -46,7 +46,7 @@ Start the desktop launcher from the repository root with the single checked-in e
 python desktop/src/main.py
 ```
 
-`desktop/src/main.py` is intentionally thin. It resolves the shared Codex config, builds the shell through `bootstrap_product_shell(...)`, and starts the Tk window through `launch_desktop_app()`.
+`desktop/src/main.py` is intentionally thin. It resolves the shared Codex config, builds the shell through `bootstrap_product_shell(...)`, and starts the Tk window through `launch_desktop_app()`. If Tk cannot be initialized, the launcher returns the headless test double used by the e2e suite.
 
 ## Setup
 
