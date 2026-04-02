@@ -4,7 +4,7 @@ from pathlib import Path
 import zipfile
 
 from contracts import CodexGenerationOutput
-from export import HwpxExportEngine
+from export import HwpxExportEngine, build_problem_placeholder_map
 from hwpx import HwpxArchive
 
 
@@ -46,6 +46,8 @@ def _create_template(path: Path) -> None:
             "{{QUESTION_1_NUMBER}}. {{QUESTION_1_STEM}}\n정답: {{QUESTION_1_ANSWER}}",
         )
         zf.writestr("Contents/section0.xml", _SECTION_XML)
+        zf.writestr("BinData/binary.dat", b"\x00\x01guard")
+        zf.writestr("META-INF/manifest.xml", "<manifest>stable</manifest>")
 
 
 def test_hwpx_export_renders_placeholders_and_preserves_styles(tmp_path: Path) -> None:
@@ -90,6 +92,15 @@ def test_hwpx_export_renders_placeholders_and_preserves_styles(tmp_path: Path) -
     assert 'styleIDRef="12"' in section_xml
     assert 'styleIDRef="13"' in section_xml
     assert 'charPrIDRef="22"' in section_xml
+    assert rendered.ordered_names == (
+        "mimetype",
+        "Preview/PrvText.txt",
+        "Contents/section0.xml",
+        "BinData/binary.dat",
+        "META-INF/manifest.xml",
+    )
+    assert rendered.contents["BinData/binary.dat"] == b"\x00\x01guard"
+    assert rendered.contents["META-INF/manifest.xml"] == b"<manifest>stable</manifest>"
 
 
 def test_hwpx_export_escapes_xml_text_values(tmp_path: Path) -> None:
@@ -120,4 +131,40 @@ def test_hwpx_export_escapes_xml_text_values(tmp_path: Path) -> None:
     section_xml = rendered.contents["Contents/section0.xml"].decode("utf-8")
     assert "x &lt; y" in section_xml
     assert "x &lt; y &amp; z" in section_xml
+
+
+def test_placeholder_contract_surface_matches_export_map() -> None:
+    generation_output = CodexGenerationOutput.from_dict(
+        {
+            "questions": [
+                {
+                    "id": "q-1",
+                    "stem": "문항 본문",
+                    "choices": ["A", "B", "C", "D", "E"],
+                    "answer": "B",
+                    "explanation": "해설",
+                }
+            ]
+        }
+    )
+
+    contract_text = (Path(__file__).resolve().parents[2] / "templates" / "hwpx" / "placeholder_contract.txt").read_text(
+        encoding="utf-8"
+    )
+    placeholders = set(build_problem_placeholder_map(generation_output))
+
+    assert "{{QUESTION_N_NUMBER}}" in contract_text
+    assert "{{QUESTION_N_ID}}" in contract_text
+    assert "{{QUESTION_N_STEM}}" in contract_text
+    assert "{{QUESTION_N_CHOICE_M}}" in contract_text
+    assert "{{QUESTION_N_ANSWER}}" in contract_text
+    assert "{{QUESTION_N_EXPLANATION}}" in contract_text
+    assert {
+        "{{QUESTION_1_NUMBER}}",
+        "{{QUESTION_1_ID}}",
+        "{{QUESTION_1_STEM}}",
+        "{{QUESTION_1_CHOICE_1}}",
+        "{{QUESTION_1_ANSWER}}",
+        "{{QUESTION_1_EXPLANATION}}",
+    }.issubset(placeholders)
 

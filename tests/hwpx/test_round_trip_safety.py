@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import zipfile
 
+from contracts import CodexGenerationOutput
+from export import HwpxExportEngine
 from hwpx import HwpxArchive, extract_placeholder_tokens
 
 
@@ -43,3 +45,39 @@ def test_hwpx_round_trip_preserves_placeholder_surface_tokens(tmp_path: Path) ->
     reopened_tokens = extract_placeholder_tokens(reopened.read_preview_text())
 
     assert reopened_tokens == original_tokens
+
+
+def test_hwpx_export_round_trip_preserves_real_template_layout_and_styles(tmp_path: Path) -> None:
+    output_path = tmp_path / "rendered.hwpx"
+    generation_output = CodexGenerationOutput.from_dict(
+        {
+            "questions": [
+                {
+                    "id": "q-1",
+                    "stem": "unused",
+                    "choices": ["1", "2", "3", "4", "5"],
+                    "answer": "1",
+                }
+            ]
+        }
+    )
+
+    source = HwpxArchive.load(SAMPLE_TEMPLATE)
+    source_style_ids = source.style_id_fingerprint()
+    source_tokens = extract_placeholder_tokens(source.read_preview_text())
+
+    result = HwpxExportEngine().render(
+        template_path=SAMPLE_TEMPLATE,
+        output_path=output_path,
+        generation_output=generation_output,
+    )
+
+    rendered = HwpxArchive.load(output_path)
+
+    assert result.rendered_placeholders == 0
+    assert result.verified_reopen is True
+    assert result.style_ids_preserved is True
+    assert rendered.ordered_names == source.ordered_names
+    assert rendered.payload_fingerprint() == source.payload_fingerprint()
+    assert rendered.style_id_fingerprint() == source_style_ids
+    assert extract_placeholder_tokens(rendered.read_preview_text()) == source_tokens

@@ -12,7 +12,6 @@ from hwpx import HwpxArchive
 
 
 _XML_CONTENT_ENTRY_RE = re.compile(r"^Contents/.+\.xml$")
-_STYLE_ID_RE = re.compile(r'(?:styleIDRef|paraPrIDRef|charPrIDRef)="([^"]+)"')
 
 
 class HwpxExportError(RuntimeError):
@@ -57,7 +56,7 @@ class HwpxExportEngine:
         if extra_placeholders:
             placeholder_map.update(dict(extra_placeholders))
 
-        rendered_archive, rendered_count = self._render_archive(source, placeholder_map)
+        rendered_archive, rendered_count, updated_entries = self._render_archive(source, placeholder_map)
         self._assert_xml_entries_parse(rendered_archive)
 
         destination = Path(output_path)
@@ -68,6 +67,12 @@ class HwpxExportEngine:
         try:
             rendered_archive.save(temp_output)
             reopened = HwpxArchive.load(temp_output)
+            self._assert_archive_layout(source, reopened)
+            self._assert_unmodified_entries_preserved(
+                original=source,
+                reopened=reopened,
+                modified_entries=updated_entries,
+            )
             reopened_fingerprint = self._style_fingerprint(reopened)
             style_ids_preserved = reopened_fingerprint == original_style_fingerprint
             if not style_ids_preserved:
@@ -91,9 +96,10 @@ class HwpxExportEngine:
         self,
         archive: HwpxArchive,
         placeholders: Mapping[str, str],
-    ) -> tuple[HwpxArchive, int]:
+    ) -> tuple[HwpxArchive, int, tuple[str, ...]]:
         updated_contents = dict(archive.contents)
         total_count = 0
+        updated_entries: list[str] = []
 
         for name in archive.ordered_names:
             payload = archive.contents[name]
@@ -107,6 +113,7 @@ class HwpxExportEngine:
                 if count > 0:
                     updated_contents[name] = replaced.encode("utf-8")
                     total_count += count
+                    updated_entries.append(name)
                 continue
 
             if _XML_CONTENT_ENTRY_RE.match(name):
@@ -119,12 +126,13 @@ class HwpxExportEngine:
                 if count > 0:
                     updated_contents[name] = replaced.encode("utf-8")
                     total_count += count
+                    updated_entries.append(name)
 
         return HwpxArchive(
             ordered_names=archive.ordered_names,
             contents=updated_contents,
             zip_infos=archive.zip_infos,
-        ), total_count
+        ), total_count, tuple(updated_entries)
 
     @staticmethod
     def _assert_xml_entries_parse(archive: HwpxArchive) -> None:
@@ -139,14 +147,24 @@ class HwpxExportEngine:
 
     @staticmethod
     def _style_fingerprint(archive: HwpxArchive) -> tuple[tuple[str, tuple[str, ...]], ...]:
-        fingerprint: list[tuple[str, tuple[str, ...]]] = []
-        for name in archive.ordered_names:
-            if not _XML_CONTENT_ENTRY_RE.match(name):
-                continue
-            xml_text = archive.contents[name].decode("utf-8", errors="strict")
-            style_ids = tuple(_STYLE_ID_RE.findall(xml_text))
-            fingerprint.append((name, style_ids))
-        return tuple(fingerprint)
+        return archive.style_id_fingerprint()
+
+    @staticmethod
+    def _assert_archive_layout(original: HwpxArchive, reopened: HwpxArchive) -> None:
+        if reopened.ordered_names != original.ordered_names:
+            raise HwpxExportError("Archive entry layout changed after placeholder rendering.")
+
+    @staticmethod
+    def _assert_unmodified_entries_preserved(
+        *,
+        original: HwpxArchive,
+        reopened: HwpxArchive,
+        modified_entries: tuple[str, ...],
+    ) -> None:
+        if reopened.payload_fingerprint(exclude_names=modified_entries) != original.payload_fingerprint(
+            exclude_names=modified_entries
+        ):
+            raise HwpxExportError("Unmodified archive entries changed during placeholder rendering.")
 
 
 def _replace_text_with_placeholders(

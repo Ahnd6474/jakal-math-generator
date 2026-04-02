@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import re
 from pathlib import Path
 import zipfile
+from typing import Iterable
 
 _PLACEHOLDER_TOKEN_RE = re.compile(
     r"<[^<>\r\n]{0,120}>|\[[^\[\]\r\n]{0,120}\]|[①②③④⑤]"
@@ -48,6 +49,31 @@ class HwpxArchive:
 
     def read_preview_text(self) -> str:
         return self.contents["Preview/PrvText.txt"].decode("utf-8", errors="strict")
+
+    def xml_entry_names(self) -> tuple[str, ...]:
+        return tuple(name for name in self.ordered_names if name.startswith("Contents/") and name.endswith(".xml"))
+
+    def style_id_fingerprint(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        style_id_re = re.compile(r'(?:styleIDRef|paraPrIDRef|charPrIDRef)="([^"]+)"')
+        fingerprint: list[tuple[str, tuple[str, ...]]] = []
+        for name in self.xml_entry_names():
+            xml_text = self.contents[name].decode("utf-8", errors="strict")
+            fingerprint.append((name, tuple(style_id_re.findall(xml_text))))
+        return tuple(fingerprint)
+
+    def payload_fingerprint(
+        self,
+        *,
+        include_names: Iterable[str] | None = None,
+        exclude_names: Iterable[str] = (),
+    ) -> tuple[tuple[str, bytes], ...]:
+        include_set = set(include_names) if include_names is not None else set(self.ordered_names)
+        exclude_set = set(exclude_names)
+        return tuple(
+            (name, self.contents[name])
+            for name in self.ordered_names
+            if name in include_set and name not in exclude_set
+        )
 
 
 def extract_placeholder_tokens(text: str) -> tuple[str, ...]:
