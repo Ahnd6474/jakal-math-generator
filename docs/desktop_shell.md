@@ -1,4 +1,4 @@
-# Product Shell (ST5)
+# Desktop Shell
 
 ## Purpose
 
@@ -38,6 +38,16 @@ The shell keeps product-facing run states explicit so the desktop UI can render 
 
 The form is translated into the shared `QuestionSpec` contract before calling Codex.
 
+## Launch Path
+
+Start the desktop launcher from the repository root with the single checked-in entrypoint:
+
+```powershell
+python desktop/src/main.py
+```
+
+`desktop/src/main.py` is intentionally thin. It resolves the shared Codex config, builds the shell through `bootstrap_product_shell(...)`, and starts the Tk window through `launch_desktop_app()`.
+
 ## Setup
 
 1. Install Python 3.11+.
@@ -53,16 +63,16 @@ python -m pip install -U pytest
 python -m pytest
 ```
 
-## Usage Sketch
+## Programmatic Usage Sketch
 
 ```python
 from generation.adapter import CodexCliAdapter, CodexExecutionConfig
-from product_shell import GenerationForm, ProductShellApp
+from product_shell import GenerationForm, bootstrap_product_shell
 from validation import GenerationValidator
 from export import HwpxExportEngine
 
 config = CodexExecutionConfig.from_path("configs/codex/execution.json")
-app = ProductShellApp(
+app = bootstrap_product_shell(
     adapter=CodexCliAdapter(config),
     validator=GenerationValidator(),
     exporter=HwpxExportEngine(),
@@ -94,10 +104,20 @@ if state.status == "accepted":
 - Prompt templates must begin with `PROMPT_KIND: problem_generation`.
 - Artifacts (`request.json`, `stdout.log`, `stderr.log`, `run.log`) are collected by the adapter and exposed as `state.codex_logs`.
 
+## Export Guarantees
+
+The desktop launcher does not implement a second export path. Once the shell accepts generated output, it delegates to the shared `HwpxExportEngine`, which keeps the existing export guardrails in force:
+
+- placeholder replacement stays inside the template contract surface
+- rendered XML entries must still parse before writeout
+- archive entry order and untouched payload bytes are preserved on reopen
+- HWPX style-id fingerprints must match before the output file replaces the destination
+
 ## E2E Coverage
 
 `desktop/tests/e2e/test_product_shell_integration.py` validates:
 
+- launcher entrypoint -> shell bootstrap -> generate -> export flow
 - successful generate -> preview -> export flow
 - Codex parse failure state
 - validation failure state

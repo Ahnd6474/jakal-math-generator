@@ -4,9 +4,11 @@ import json
 from pathlib import Path
 import zipfile
 
+import main as desktop_main
 from contracts import CodexGenerationOutput, REGEN_REASON_ORIGINALITY_TOO_SIMILAR
 from export import HwpxExportEngine
 from generation.adapter.codex_cli import CodexAdapterResult
+from hwpx import HwpxArchive
 from product_shell import GenerationForm, ProductShellApp, RunStatus
 from validation import GenerationValidator
 
@@ -133,6 +135,86 @@ def test_shell_successful_generation_preview_and_export(tmp_path: Path) -> None:
     assert exported.status == RunStatus.EXPORT_SUCCEEDED
     assert exported.export_result is not None
     assert exported.export_result.output_path == export_path
+
+
+def test_launcher_entrypoint_reaches_export_preserving_hwpx_contracts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    template_path = tmp_path / "template.hwpx"
+    export_path = tmp_path / "launcher-output.hwpx"
+    _create_template(template_path)
+
+    output = CodexGenerationOutput.from_dict(
+        {
+            "questions": [
+                {
+                    "id": "Q1",
+                    "stem": "Launcher-generated stem.",
+                    "choices": ["1", "2"],
+                    "answer": "2",
+                    "explanation": "Launcher path uses the shared shell.",
+                }
+            ]
+        }
+    )
+    adapter = FakeAdapter([_make_adapter_result(tmp_path, output=output, success=True)])
+
+    class FakeConfig:
+        def __init__(self, repo_root: Path) -> None:
+            self.repo_root = repo_root
+
+    class FakeWindow:
+        def __init__(self, shell_app: ProductShellApp) -> None:
+            self.shell_app = shell_app
+            self.mainloop_calls = 0
+
+        def mainloop(self) -> None:
+            self.mainloop_calls += 1
+
+    def fake_from_path(path: Path, *, repo_root: Path) -> FakeConfig:
+        assert path == repo_root / "configs" / "codex" / "execution.json"
+        return FakeConfig(repo_root)
+
+    def fake_adapter_factory(config: FakeConfig) -> FakeAdapter:
+        assert config.repo_root == tmp_path
+        return adapter
+
+    launcher_state: dict[str, object] = {}
+
+    def fake_build_window(*, shell_app=None):
+        if shell_app is None:
+            shell_app = desktop_main.build_product_shell(repo_root=tmp_path)
+        window = FakeWindow(shell_app)
+        launcher_state["window"] = window
+        return window
+
+    monkeypatch.setattr(desktop_main.CodexExecutionConfig, "from_path", fake_from_path)
+    monkeypatch.setattr(desktop_main, "CodexCliAdapter", fake_adapter_factory)
+    monkeypatch.setattr(desktop_main, "build_window", fake_build_window)
+
+    window = desktop_main.launch_desktop_app()
+    assert window is launcher_state["window"]
+    assert window.mainloop_calls == 1
+    assert isinstance(window.shell_app, ProductShellApp)
+
+    accepted = window.shell_app.start_generation(_build_form(template_path))
+    assert accepted.status == RunStatus.ACCEPTED
+
+    exported = window.shell_app.export_hwpx(output_path=export_path)
+    assert exported.status == RunStatus.EXPORT_SUCCEEDED
+    assert exported.export_result is not None
+    assert exported.export_result.verified_reopen is True
+    assert exported.export_result.style_ids_preserved is True
+
+    archive = HwpxArchive.load(export_path)
+    preview = archive.read_preview_text()
+    section_xml = archive.contents["Contents/section0.xml"].decode("utf-8")
+
+    assert "Launcher-generated stem." in preview
+    assert "{{QUESTION_1_STEM}}" not in preview
+    assert 'styleIDRef="12"' in section_xml
+    assert 'styleIDRef="13"' in section_xml
 
 
 def test_shell_distinguishes_codex_parse_failure(tmp_path: Path) -> None:
